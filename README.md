@@ -1,0 +1,2 @@
+# simplex
+Algoritmo simplex completo

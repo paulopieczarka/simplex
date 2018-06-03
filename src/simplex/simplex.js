@@ -20,6 +20,21 @@ class Simplex {
   }
 
   addRestriction(fn) {
+    // Quando b for negativo, inverte função.
+    if (fn.value < 0) {
+      console.log('INVERTENDO --> ', fn)
+      fn.value = fn.value * -1
+      fn.vars = fn.vars.map(c => c * -1)
+
+      switch (fn.type) {
+        case '>=': fn.type = '<='; break
+        case '<=': fn.type = '>='; break
+        case '>': fn.type = '<'; break
+        case '<': fn.type = '>'; break
+        default: fn.type = '='
+      }
+    }
+    console.log(fn)
     this.restrictions.push(fn)
   }
 

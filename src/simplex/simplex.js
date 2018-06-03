@@ -8,21 +8,86 @@ const Restriction = (fn) => ({
 })
 
 class Simplex {
-  constructor() {
-    this.costs = [] // função objetivo
-    this.restrictions = [] // restrições
+  constructor () {
+    this.costs = []
+    this.restrictions = []
   }
 
-  setFn(fnArray) {
-    this.type = fnArray.splice(0, 1)[0] // max or min
-    fnArray.forEach(x => this.costs.push(x))
+  // Solver.
+
+  fase1 () {
+    console.log('[============= FASE 1 =============]')
+    this.mat = createMatrix(this.restrictions)
+    this.b = this.restrictions.map(x => x.value)
+
+    const oldRestrictions = this.restrictions.slice()
+    const oldMat = this.mat.map(row => row.slice())
+    const oldCosts = this.costs.slice()
+    const oldFnSize = this.fnSize * 1
+
+    this.addIdentidade()
+    this.print()    
+    this.setInitialBandN()
+
+    const j = this.costs.length - this.restrictions.length
+    this.artificialCosts = this.costs.map((x, i) => i<j ? 0 : 1)
+
+    console.log(this.artificialCosts)
+
+    const solver = new SimplexSteps(this.mat, this.b, this.artificialCosts, this.B, this.N)
+    const { B, N } = solver.exec()
+
+    this.B = B
+    this.N = N.filter(x => x<j)
+    this.mat = oldMat
+    this.restrictions = oldRestrictions
+    this.fnSize = oldFnSize
+    this.costs = oldCosts
+  }
+
+  fase2 () {
+    console.log('[============= FASE 2 =============]')
+
+    if (!this.mat) {
+      this.mat = createMatrix(this.restrictions)
+      this.b = this.restrictions.map(x => x.value)
+      this.setInitialBandN()
+    }
+
+    this.print()
+    console.log(' N =', this.N, ' B =', this.B)
+    console.log(' custos f =', this.costs)
+
+    const solver = new SimplexSteps(this.mat, this.b, this.costs, this.B, this.N)
+    const response = solver.exec()
+    console.log(response)
+  }
+
+  solve () {
+    this.toStandardFn()
+
+    if (this.needFase1) {
+      console.log('[?] Precisa Fase 1? Sim.')
+      this.fase1()
+    }
+    else {
+      console.log('[?] Precisa Fase 2? Não.')
+    }
+
+    this.fase2()
+  }
+
+  // Start
+
+  setFn (fn) {
+    this.fnType = fn.splice(0, 1)[0]
+    fn.forEach(x => this.costs.push(x))
     this.fnSize = this.costs.length
   }
 
   addRestriction(fn) {
     // Quando b for negativo, inverte função.
     if (fn.value < 0) {
-      console.log('INVERTENDO --> ', fn)
       fn.value = fn.value * -1
       fn.vars = fn.vars.map(c => c * -1)
 
@@ -34,58 +99,46 @@ class Simplex {
         default: fn.type = '='
       }
     }
-    console.log(fn)
+
     this.restrictions.push(fn)
   }
 
-  setRestrictions(fns) {
-    fns.forEach(f => this.addRestriction(Restriction(f)))
+  setRestrictions (fns) {
+    fns.forEach(fn => this.addRestriction(Restriction(fn)))
   }
 
-  // Passo 0
-  toStandardFn() {
+  // Steps.
+  toStandardFn () {
     console.log('[0] Para Formula padrão.')
-    this.originalType = this.type
-    if (this.type === 'max') {
+    this.originalType = this.fnType
+    if (this.fnType === 'max') {
       this.type = 'min'
       this.costs = this.costs.map(x => x * (-1))
     }
 
     this.costs = [...this.costs, ...Array(this.restrictions.length).fill(0)]
-    console.log('CustosB = ', this.costs)
 
-    let pos = 0, needFaseI = false
-    this.restrictions = this.restrictions.map(r => {
-      if (r.type !== '<=') {
-        needFaseI = true
+    console.log(' custos =', this.costs)
+
+    let pos = 0
+    this.restrictions = this.restrictions.map(res => {
+      const newVars = Array(this.restrictions.length).fill(0)
+
+      switch (res.type) {
+        case '>=': newVars[pos++] = -1; break
+        case '<=': newVars[pos++] =  1;  break
+        case '>':  newVars[pos++] = -1; break
+        case '<':  newVars[pos++] =  1; break
+        default: newVars[pos++] = 0
       }
 
-      const newVars = Array(this.restrictions.length).fill(0)
-      newVars[pos++] = getSign(r.type)
-      r.vars = [...r.vars, ...newVars]
-      return r
+      res.vars = [...res.vars, ...newVars]
+      return res
     })
+    
+    this.restrictions.forEach(r => console.log('', r.vars))
 
-    this.mat = createMatrix(this.restrictions)
-    this.b = this.restrictions.map(x => x.value)
-
-    this.printMat()
-
-    if (needFaseI) {
-      console.log('[[[[ FASE É NECESSÁRIA ]]]]')
-      this.addIdentidade()
-      this.printMat()
-    }
-
-    // Separar N e B
-    let bSize = this.restrictions.length
-    let nSize = this.fnSize
-
-    console.log(Array(bSize).fill(0).map((x, i) => this.fnSize + i))
-
-    this.N = Array(nSize).fill(0).map((x, i) => i)
-    this.B = Array(bSize).fill(0).map((x, i) => this.fnSize + i)
-    console.log('N =', this.N, ' B =', this.B)
+    console.log()
   }
 
   addIdentidade() {
@@ -97,11 +150,74 @@ class Simplex {
     this.fnSize += this.restrictions.length
   }
 
+  setInitialBandN () {
+    let bSize = this.restrictions.length
+    let nSize = this.fnSize
+
+    this.N = Array(nSize).fill(0).map((x, i) => i)
+    this.B = Array(bSize).fill(0).map((x, i) => this.fnSize + i)
+    console.log(' N =', this.N, ' B =', this.B)
+  }
+
+  print () {
+    this.mat.forEach(row => console.log('', row))
+  }
+
+  // Methods.
+
+  get needFase1 () {
+    let need = false
+    this.restrictions.map(r => {
+      if (r.type !== '<=') { need = true }
+    })
+
+    return need
+  }
+}
+
+class SimplexSteps {
+  constructor (mat, b, costs, B, N) {
+    this.b = b
+    this.mat = mat
+    this.costs = costs
+    this.B = B
+    this.N = N
+  }
+
+  exec () {
+
+    // Run.
+
+    for (let it = 1; true; it++) {
+      console.log('\n--------------- it =', it, '-------------------\n')
+      this.calcBasicSolution()
+      this.calcVector()
+      this.calcRelativeCosts()
+      this.whoEntersInB()
+      if (this.isOtimo()) {
+        break
+      }
+      this.calcSimplexDir()
+      if (this.whoLeft()) {
+        break
+      }
+      this.refreshB()
+    }
+
+    return {
+      xB: this.xB,
+      N: this.N,
+      B: this.B,
+      S: this.S
+    }
+  }
+
   // Passo 1
   calcBasicSolution() {
     console.log('\n[1] Cálculo da solução básica.')
     // Calcular  xBi
-    console.log(this.matrixB, this.b)
+    this.matrixB.forEach(x => console.log('', x))
+    console.log(' b=', this.b)
     this.xB = gauss(this.matrixB, this.b)
     this.xB.forEach((xb, i) => console.log(` xB${i} = ${xb}`))
 
@@ -210,38 +326,6 @@ class Simplex {
     console.log(' B =', this.B, 'N =', this.N)
   }
 
-  solve() {
-    console.log('Simplex.')
-
-    this.toStandardFn()
-    //console.log(this.matrixB)
-    for (let it = 1; true; it++) {
-      console.log('\n--------------- it =', it, '-------------------\n')
-      this.calcBasicSolution()
-      this.calcVector()
-      this.calcRelativeCosts()
-      this.whoEntersInB()
-      if (this.isOtimo()) {
-        break
-      }
-      this.calcSimplexDir()
-      if (this.whoLeft()) {
-        break
-      }
-      this.refreshB()
-    }
-
-    console.log('\n\n*** FIM ***\n')
-
-    if (this.originalType === 'max') {
-      this.S *= -1
-    }
-
-    console.log(' Solução', this.originalType, 'f(x) =', this.S)
-    this.xB.forEach((xb, i) => console.log(` x${i} = ${xb}`))
-    console.log()
-  }
-
   get matrixB() {
     let mt = _.zip(...this.mat) // transpose this.mat
     let bt = this.B.map(i => mt[i])
@@ -261,12 +345,6 @@ class Simplex {
 
   getCN(n) {
     return this.costs[n]
-  }
-
-  printMat(m = this.mat) {
-    m.forEach(row => {
-      console.log(row)
-    })
   }
 }
 
@@ -288,12 +366,4 @@ function mulMatrix(a, b) {
   return result
 }
 
-function getSign(x) {
-  return x === '='
-    ? 0 : x === '<='
-      ? 1 : x === '>='
-        ? -1 : NaN
-
-}
-
-module.exports = Simplex;
+module.exports = Simplex
